@@ -1,0 +1,6 @@
+{
+  "name": "Google Drive PDF Uploader",
+  "description": "Upload PDFs directly to Google Drive with instant public link generation, QR code sharing, dashboard analytics, and file history management.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
