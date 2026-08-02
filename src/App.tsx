@@ -188,11 +188,24 @@ export default function App() {
           );
         }
       } else {
-        let errMsg = 'Upload failed';
+        let errMsg = '';
         try {
           const errRes = JSON.parse(xhr.responseText);
-          errMsg = errRes.error || errMsg;
-        } catch {}
+          errMsg = errRes.error || errRes.message || '';
+        } catch {
+          if (xhr.status === 413) {
+            errMsg = 'File size exceeds maximum upload limit for serverless functions (Netlify limit is 6 MB per upload).';
+          } else if (xhr.status === 504 || xhr.status === 502) {
+            errMsg = 'Serverless function execution timed out during upload processing.';
+          } else if (xhr.status === 404) {
+            errMsg = 'Upload endpoint non-responsive (404 Not Found).';
+          } else {
+            errMsg = `Server returned status error ${xhr.status} (${xhr.statusText || 'Upload Error'}).`;
+          }
+        }
+        if (!errMsg) {
+          errMsg = `Upload failed with HTTP code ${xhr.status}.`;
+        }
 
         setUploadProgress((prev) =>
           prev
