@@ -88,7 +88,7 @@ export const HeroUpload: React.FC<HeroUploadProps> = ({
       <div className="text-center space-y-4 mb-8 sm:mb-12">
         <div className="inline-flex items-center space-x-2 px-3.5 py-1.5 rounded-full bg-blue-50 dark:bg-blue-950/60 border border-blue-200/80 dark:border-blue-800 text-blue-700 dark:text-blue-300 text-xs font-semibold tracking-wide uppercase shadow-sm">
           <Zap className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-          <span>Serverless Netlify + Google Drive API</span>
+          <span>Serverless Vercel & Netlify + Google Drive API</span>
         </div>
 
         <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold text-slate-900 dark:text-white tracking-tight leading-none">
