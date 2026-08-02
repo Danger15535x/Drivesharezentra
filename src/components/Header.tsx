@@ -1,6 +1,6 @@
 import React from 'react';
-import { HardDrive, UploadCloud, History, BarChart2, Settings, Moon, Sun, ShieldCheck, Sparkles } from 'lucide-react';
-import { AppSettings } from '../types';
+import { HardDrive, UploadCloud, History, BarChart2, Settings, Moon, Sun, ShieldCheck, Sparkles, LogIn, LogOut, User } from 'lucide-react';
+import { AppSettings, GoogleUser } from '../types';
 
 interface HeaderProps {
   activeTab: 'upload' | 'history' | 'dashboard' | 'settings';
@@ -9,6 +9,9 @@ interface HeaderProps {
   darkMode: boolean;
   setDarkMode: (val: boolean) => void;
   openSettings: () => void;
+  googleUser: GoogleUser | null;
+  onLogin: () => void;
+  onLogout: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -18,6 +21,9 @@ export const Header: React.FC<HeaderProps> = ({
   darkMode,
   setDarkMode,
   openSettings,
+  googleUser,
+  onLogin,
+  onLogout,
 }) => {
   return (
     <header className="sticky top-0 z-40 backdrop-blur-md bg-white/80 dark:bg-slate-900/80 border-b border-slate-200/80 dark:border-slate-800 transition-colors">
@@ -42,12 +48,22 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
 
-        {/* Integration Status Pill */}
-        <div className="hidden lg:flex items-center space-x-2">
-          {settings.hasGoogleCredentials ? (
+        {/* Integration Status & User Profile */}
+        <div className="hidden lg:flex items-center space-x-3">
+          {googleUser ? (
+            <div className="flex items-center space-x-2 px-3 py-1 rounded-full bg-blue-50 border border-blue-200 text-blue-700 dark:bg-blue-950/50 dark:border-blue-800 dark:text-blue-300 text-xs font-medium">
+              {googleUser.picture ? (
+                <img src={googleUser.picture} alt={googleUser.name} className="w-4 h-4 rounded-full" />
+              ) : (
+                <User className="w-3.5 h-3.5 text-blue-500" />
+              )}
+              <span className="max-w-[120px] truncate">{googleUser.name}</span>
+              <span className="text-[10px] bg-blue-200 dark:bg-blue-800 px-1.5 py-0.5 rounded font-bold">Drive Auth</span>
+            </div>
+          ) : settings.hasGoogleCredentials ? (
             <div className="flex items-center space-x-1.5 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 dark:bg-emerald-950/40 dark:border-emerald-800 dark:text-emerald-300 text-xs font-medium">
               <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
-              <span>Google Drive Connected</span>
+              <span>Drive API Service Connected</span>
             </div>
           ) : (
             <button
@@ -111,6 +127,27 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
 
           <div className="h-5 w-px bg-slate-200 dark:bg-slate-800 mx-1" />
+
+          {/* Google Login / Logout Button */}
+          {googleUser ? (
+            <button
+              onClick={onLogout}
+              className="flex items-center space-x-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/50 hover:bg-rose-100 dark:hover:bg-rose-900/50 border border-rose-200 dark:border-rose-800 transition-colors"
+              title="Sign Out of Google"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Sign Out</span>
+            </button>
+          ) : (
+            <button
+              onClick={onLogin}
+              className="flex items-center space-x-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/50 hover:bg-blue-100 dark:hover:bg-blue-900/50 border border-blue-200 dark:border-blue-800 transition-colors"
+              title="Sign In with Google Account"
+            >
+              <LogIn className="w-3.5 h-3.5" />
+              <span>Google Sign-In</span>
+            </button>
+          )}
 
           {/* Dark Mode Toggle */}
           <button

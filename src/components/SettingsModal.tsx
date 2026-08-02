@@ -11,19 +11,29 @@ import {
   Check,
   AlertCircle,
   HelpCircle,
+  UserCheck,
+  LogIn,
+  LogOut,
+  Lock,
 } from 'lucide-react';
-import { AppSettings } from '../types';
+import { AppSettings, GoogleUser } from '../types';
 
 interface SettingsModalProps {
   settings: AppSettings;
   onSaveSettings: (updated: Partial<AppSettings> & { googlePrivateKey?: string }) => void;
   showToast: (msg: string) => void;
+  googleUser: GoogleUser | null;
+  onLogin: () => void;
+  onLogout: () => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
   settings,
   onSaveSettings,
   showToast,
+  googleUser,
+  onLogin,
+  onLogout,
 }) => {
   const [maxSize, setMaxSize] = useState(settings.maxUploadSizeMb);
   const [folderId, setFolderId] = useState(settings.folderId);
@@ -32,6 +42,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [autoCopy, setAutoCopy] = useState(settings.autoCopyLink);
   const [autoClear, setAutoClear] = useState(settings.autoClearUpload);
   const [darkMode, setDarkMode] = useState(settings.darkMode);
+  const [requireGoogleLogin, setRequireGoogleLogin] = useState(settings.requireGoogleLogin || false);
 
   const [clientEmail, setClientEmail] = useState(settings.googleClientEmail || '');
   const [privateKey, setPrivateKey] = useState('');
@@ -48,6 +59,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       autoCopyLink: autoCopy,
       autoClearUpload: autoClear,
       darkMode,
+      requireGoogleLogin,
       googleClientEmail: clientEmail,
       googlePrivateKey: privateKey.trim() ? privateKey : undefined,
       googleProjectId: projectId,
@@ -66,8 +78,64 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           <span>Application Settings</span>
         </h2>
         <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-          Configure upload limits, Google Drive permissions, and environment variables.
+          Configure upload limits, Google account login, Google Drive permissions, and environment variables.
         </p>
+      </div>
+
+      {/* Google User Authentication Status Card */}
+      <div className="p-6 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-3xl text-white shadow-lg space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-3">
+            <div className="w-12 h-12 rounded-2xl bg-white/20 backdrop-blur-md flex items-center justify-center">
+              <Lock className="w-6 h-6 text-white" />
+            </div>
+            <div>
+              <h3 className="text-lg font-bold">Google User OAuth 2.0 Access</h3>
+              <p className="text-xs text-blue-100">
+                Direct Google Account authentication for uploading PDFs into your personal Google Drive storage.
+              </p>
+            </div>
+          </div>
+
+          {googleUser ? (
+            <button
+              type="button"
+              onClick={onLogout}
+              className="px-4 py-2 rounded-xl bg-white/20 hover:bg-white/30 text-xs font-semibold backdrop-blur-md transition-colors flex items-center space-x-1.5"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span>Sign Out</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={onLogin}
+              className="px-5 py-2.5 rounded-xl bg-white text-blue-600 hover:bg-blue-50 text-xs font-bold shadow-md transition-all active:scale-95 flex items-center space-x-1.5"
+            >
+              <LogIn className="w-4 h-4" />
+              <span>Sign in with Google</span>
+            </button>
+          )}
+        </div>
+
+        {googleUser && (
+          <div className="p-3.5 rounded-2xl bg-white/10 backdrop-blur-md text-xs flex items-center justify-between">
+            <div className="flex items-center space-x-2">
+              {googleUser.picture ? (
+                <img src={googleUser.picture} alt={googleUser.name} className="w-6 h-6 rounded-full" />
+              ) : (
+                <UserCheck className="w-5 h-5 text-emerald-300" />
+              )}
+              <div>
+                <p className="font-semibold">{googleUser.name}</p>
+                <p className="text-[11px] text-blue-200">{googleUser.email}</p>
+              </div>
+            </div>
+            <span className="px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-200 border border-emerald-400/30 text-[11px] font-bold">
+              Drive Authorized
+            </span>
+          </div>
+        )}
       </div>
 
       <form onSubmit={handleSave} className="space-y-8">
@@ -124,6 +192,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
             {/* Toggles Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+              <label className="flex items-center justify-between p-4 rounded-2xl border border-slate-200 dark:border-slate-700/80 bg-slate-50/50 dark:bg-slate-900/40 cursor-pointer">
+                <div>
+                  <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 block">
+                    Mandatory Google Login
+                  </span>
+                  <span className="text-[11px] text-slate-400">Require users to log in with Google before upload</span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={requireGoogleLogin}
+                  onChange={(e) => setRequireGoogleLogin(e.target.checked)}
+                  className="w-4 h-4 accent-blue-600 rounded"
+                />
+              </label>
+
               <label className="flex items-center justify-between p-4 rounded-2xl border border-slate-200 dark:border-slate-700/80 bg-slate-50/50 dark:bg-slate-900/40 cursor-pointer">
                 <div>
                   <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 block">
@@ -203,7 +286,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             ) : (
               <span className="px-3 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200 text-xs font-bold flex items-center space-x-1">
                 <Sparkles className="w-3.5 h-3.5" />
-                <span>Using Demo Storage</span>
+                <span>Using OAuth / Demo Storage</span>
               </span>
             )}
           </div>
@@ -214,10 +297,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <span>How to connect real Google Drive storage:</span>
             </p>
             <ol className="list-decimal pl-5 space-y-1 text-[11px]">
-              <li>Create a Service Account in Google Cloud Console & enable Google Drive API.</li>
-              <li>Create a JSON key, copy `client_email` and `private_key`.</li>
-              <li>Share your Google Drive Folder with the service account email as Editor.</li>
-              <li>Paste credentials below or set environment variables in Vercel / Netlify / .env.</li>
+              <li>Sign in with your Google account above using Google OAuth.</li>
+              <li>Or create a Service Account in Google Cloud Console & enable Google Drive API.</li>
+              <li>Paste Service Account credentials below or set environment variables in Vercel / Netlify / .env.</li>
             </ol>
           </div>
 

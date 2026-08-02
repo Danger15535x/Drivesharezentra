@@ -28,6 +28,14 @@ export interface DashboardStats {
   avgFileSizeBytes: number;
 }
 
+export interface GoogleUser {
+  name: string;
+  email: string;
+  picture?: string;
+  accessToken: string;
+  expiresAt: number; // timestamp ms
+}
+
 export interface AppSettings {
   maxUploadSizeMb: number;
   folderId: string;
@@ -39,4 +47,6 @@ export interface AppSettings {
   hasGoogleCredentials: boolean;
   googleClientEmail?: string;
   googleProjectId?: string;
+  requireGoogleLogin?: boolean;
+  googleClientId?: string;
 }

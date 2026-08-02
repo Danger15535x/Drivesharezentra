@@ -1,17 +1,21 @@
 import React, { useState, useRef } from 'react';
-import { UploadCloud, FileText, Lock, Zap, CheckCircle2, ShieldCheck, FileCheck2 } from 'lucide-react';
-import { AppSettings } from '../types';
+import { UploadCloud, FileText, Lock, Zap, CheckCircle2, ShieldCheck, FileCheck2, LogIn, UserCheck } from 'lucide-react';
+import { AppSettings, GoogleUser } from '../types';
 
 interface HeroUploadProps {
   onFileSelect: (file: File, customName?: string) => void;
   settings: AppSettings;
   openSettings: () => void;
+  googleUser: GoogleUser | null;
+  onLogin: () => void;
 }
 
 export const HeroUpload: React.FC<HeroUploadProps> = ({
   onFileSelect,
   settings,
   openSettings,
+  googleUser,
+  onLogin,
 }) => {
   const [isDragging, setIsDragging] = useState(false);
   const [selectedFilePending, setSelectedFilePending] = useState<File | null>(null);
@@ -61,7 +65,12 @@ export const HeroUpload: React.FC<HeroUploadProps> = ({
       return;
     }
 
-    // Always prompt or directly upload based on default
+    if (settings.requireGoogleLogin && !googleUser) {
+      alert('Google Account sign-in is required to upload files. Please sign in with Google to continue.');
+      onLogin();
+      return;
+    }
+
     setSelectedFilePending(file);
     setCustomFilename(file.name.replace(/\.pdf$/i, ''));
     setShowRenameModal(true);
@@ -99,11 +108,27 @@ export const HeroUpload: React.FC<HeroUploadProps> = ({
           Upload PDFs directly to cloud storage. Generate instant public sharing links, QR codes, and manage your file history seamlessly.
         </p>
 
+        {/* User login status badge */}
+        {googleUser ? (
+          <div className="inline-flex items-center space-x-2 px-4 py-1.5 rounded-full bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200 text-xs font-semibold shadow-sm">
+            <UserCheck className="w-4 h-4 text-emerald-500" />
+            <span>Signed in as <strong>{googleUser.email}</strong> (Direct Drive Access)</span>
+          </div>
+        ) : (
+          <button
+            onClick={onLogin}
+            className="inline-flex items-center space-x-2 px-4 py-1.5 rounded-full bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/60 dark:hover:bg-blue-900/60 border border-blue-200 dark:border-blue-800 text-blue-800 dark:text-blue-200 text-xs font-semibold shadow-sm transition-colors cursor-pointer"
+          >
+            <LogIn className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+            <span>Sign in with Google to upload directly to your Drive account</span>
+          </button>
+        )}
+
         {/* Value props badges */}
         <div className="flex flex-wrap items-center justify-center gap-4 text-xs font-medium text-slate-500 dark:text-slate-400 pt-2">
           <div className="flex items-center space-x-1.5">
             <Lock className="w-4 h-4 text-emerald-500" />
-            <span>No User Google Login Needed</span>
+            <span>Google OAuth 2.0 Auth Ready</span>
           </div>
           <span className="hidden sm:inline">•</span>
           <div className="flex items-center space-x-1.5">
@@ -123,7 +148,13 @@ export const HeroUpload: React.FC<HeroUploadProps> = ({
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
-        onClick={() => fileInputRef.current?.click()}
+        onClick={() => {
+          if (settings.requireGoogleLogin && !googleUser) {
+            onLogin();
+          } else {
+            fileInputRef.current?.click();
+          }
+        }}
         className={`relative group cursor-pointer rounded-3xl p-8 sm:p-12 text-center transition-all duration-300 border-2 border-dashed ${
           isDragging
             ? 'border-blue-500 bg-blue-50/80 dark:bg-blue-950/40 scale-[1.01] shadow-xl'
@@ -161,7 +192,11 @@ export const HeroUpload: React.FC<HeroUploadProps> = ({
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
-                fileInputRef.current?.click();
+                if (settings.requireGoogleLogin && !googleUser) {
+                  onLogin();
+                } else {
+                  fileInputRef.current?.click();
+                }
               }}
               className="w-full sm:w-auto px-8 py-3.5 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-semibold shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40 transition-all active:scale-95 flex items-center justify-center space-x-2"
             >
