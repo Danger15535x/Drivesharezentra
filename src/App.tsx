@@ -97,11 +97,11 @@ export default function App() {
       uploadedBytes: 0,
     });
 
-    const isNetlify = window.location.hostname.includes('netlify.app');
+    const isServerless = window.location.hostname.includes('vercel.app') || window.location.hostname.includes('netlify.app');
 
     // 1. Try requesting direct resumable upload session
     try {
-      const sessionEndpoint = isNetlify ? '/.netlify/functions/create-resumable-upload' : '/api/create-resumable-upload';
+      const sessionEndpoint = '/api/create-resumable-upload';
 
       const sessionRes = await fetch(sessionEndpoint, {
         method: 'POST',
@@ -157,7 +157,7 @@ export default function App() {
                 uploadedDriveId = resJson.id || '';
               } catch {}
 
-              const confirmEndpoint = isNetlify ? '/.netlify/functions/confirm-upload' : '/api/confirm-upload';
+              const confirmEndpoint = '/api/confirm-upload';
               const confirmRes = await fetch(confirmEndpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -245,13 +245,13 @@ export default function App() {
   };
 
   const performStandardMultipartUpload = (file: File, finalFilename: string) => {
-    const isNetlify = window.location.hostname.includes('netlify.app');
+    const isServerless = window.location.hostname.includes('vercel.app') || window.location.hostname.includes('netlify.app');
 
-    // On Netlify in demo mode without Google credentials, payload > 5.5MB is blocked by serverless gateway
-    if (isNetlify && file.size > 5.5 * 1024 * 1024 && !settings.hasGoogleCredentials) {
+    // On Vercel or Netlify in demo mode without Google credentials, payload > 4.5MB is blocked by serverless gateway limits
+    if (isServerless && file.size > 4.5 * 1024 * 1024 && !settings.hasGoogleCredentials) {
       setUploadProgress({
         status: 'error',
-        error: 'File size exceeds Netlify serverless limit (5MB in Demo Mode). Please configure Google Drive Credentials in Settings for direct Drive uploads up to 100MB.',
+        error: 'File size exceeds serverless gateway limit (4.5MB in Demo Mode). Please configure Google Drive Credentials in Settings / Vercel Environment Variables for direct Drive uploads up to 100MB.',
         progress: 0,
         speedBps: 0,
         remainingSeconds: 0,
@@ -356,7 +356,7 @@ export default function App() {
           errMsg = errRes.error || errRes.message || '';
         } catch {
           if (xhr.status === 413) {
-            errMsg = 'File size exceeds Netlify limit. Please configure Google Drive Credentials in Settings for direct Drive uploads up to 100MB.';
+            errMsg = 'File size exceeds serverless gateway limit (Vercel/Netlify). Please configure Google Drive Credentials in Settings for direct Drive uploads up to 100MB.';
           } else if (xhr.status === 504 || xhr.status === 502) {
             errMsg = 'Serverless function gateway timeout (502/504). Please set Google Drive Credentials in Settings for direct Drive uploads.';
           } else if (xhr.status === 404) {
@@ -393,7 +393,7 @@ export default function App() {
       );
     };
 
-    const uploadUrl = isNetlify ? '/.netlify/functions/upload' : '/api/upload';
+    const uploadUrl = '/api/upload';
     xhr.open('POST', uploadUrl, true);
     xhr.send(formData);
   };

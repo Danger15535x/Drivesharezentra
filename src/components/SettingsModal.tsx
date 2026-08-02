@@ -217,7 +217,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <li>Create a Service Account in Google Cloud Console & enable Google Drive API.</li>
               <li>Create a JSON key, copy `client_email` and `private_key`.</li>
               <li>Share your Google Drive Folder with the service account email as Editor.</li>
-              <li>Paste credentials below or set environment variables in Netlify / .env.</li>
+              <li>Paste credentials below or set environment variables in Vercel / Netlify / .env.</li>
             </ol>
           </div>
 
