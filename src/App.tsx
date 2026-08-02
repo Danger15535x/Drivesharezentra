@@ -81,36 +81,199 @@ export default function App() {
     setToastMessage(msg);
   };
 
-  // Upload Logic with XMLHttpRequest for real progress
-  const startUpload = (file: File, customFilename?: string) => {
+  // Upload Logic with Resumable Google Drive Session & Fallback Multipart
+  const startUpload = async (file: File, customFilename?: string) => {
     const finalFilename = customFilename || file.name;
     setLastUploadedRawFile({ file, name: customFilename });
     setActiveSuccessFile(null);
 
-    const formData = new FormData();
-    // Rename file if custom name provided
-    const fileToUpload = customFilename
-      ? new File([file], customFilename, { type: 'application/pdf' })
-      : file;
-
-    formData.append('file', fileToUpload);
-
-    const startTime = Date.now();
-    let lastLoaded = 0;
-    let lastTime = Date.now();
-
-    const xhr = new XMLHttpRequest();
-    setCurrentXhr(xhr);
-
     setUploadProgress({
       status: 'uploading',
-      progress: 0,
+      progress: 5,
       speedBps: 0,
       remainingSeconds: 0,
       filename: finalFilename,
       fileSize: file.size,
       uploadedBytes: 0,
     });
+
+    const isNetlify = window.location.hostname.includes('netlify.app');
+
+    // 1. Try requesting direct resumable upload session
+    try {
+      const sessionEndpoint = isNetlify ? '/.netlify/functions/create-resumable-upload' : '/api/create-resumable-upload';
+
+      const sessionRes = await fetch(sessionEndpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          filename: finalFilename,
+          size: file.size,
+          mimeType: 'application/pdf',
+        }),
+      });
+
+      if (sessionRes.ok) {
+        const sessionData = await sessionRes.json();
+
+        // Direct Drive Upload Mode
+        if (sessionData.success && sessionData.isDirectDrive && sessionData.uploadUrl) {
+          const xhr = new XMLHttpRequest();
+          setCurrentXhr(xhr);
+
+          let lastLoaded = 0;
+          let lastTime = Date.now();
+
+          xhr.upload.onprogress = (e) => {
+            if (e.lengthComputable) {
+              const now = Date.now();
+              const timeDiff = (now - lastTime) / 1000;
+              const loadedDiff = e.loaded - lastLoaded;
+              const currentSpeed = timeDiff > 0 ? loadedDiff / timeDiff : 0;
+              const remainingBytes = e.total - e.loaded;
+              const remainingTime = currentSpeed > 0 ? remainingBytes / currentSpeed : 0;
+              const percent = Math.round((e.loaded / e.total) * 90);
+
+              setUploadProgress({
+                status: 'uploading',
+                progress: percent,
+                speedBps: currentSpeed || 500000,
+                remainingSeconds: remainingTime,
+                filename: finalFilename,
+                fileSize: e.total,
+                uploadedBytes: e.loaded,
+              });
+
+              lastLoaded = e.loaded;
+              lastTime = now;
+            }
+          };
+
+          xhr.onload = async () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+              let uploadedDriveId = '';
+              try {
+                const resJson = JSON.parse(xhr.responseText);
+                uploadedDriveId = resJson.id || '';
+              } catch {}
+
+              const confirmEndpoint = isNetlify ? '/.netlify/functions/confirm-upload' : '/api/confirm-upload';
+              const confirmRes = await fetch(confirmEndpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  fileId: uploadedDriveId,
+                  filename: finalFilename,
+                  size: file.size,
+                }),
+              });
+
+              const confirmData = await confirmRes.json();
+              if (confirmData.success) {
+                setUploadProgress({
+                  status: 'idle',
+                  progress: 100,
+                  speedBps: 0,
+                  remainingSeconds: 0,
+                  filename: finalFilename,
+                  fileSize: file.size,
+                  uploadedBytes: file.size,
+                });
+
+                const uploadedRecord: UploadedFile = {
+                  id: confirmData.id,
+                  filename: confirmData.filename,
+                  publicUrl: confirmData.publicUrl,
+                  downloadUrl: confirmData.downloadUrl,
+                  size: confirmData.size,
+                  uploadedAt: confirmData.uploadedAt,
+                  mimeType: confirmData.mimeType,
+                  folderId: confirmData.folderId,
+                  isDemoMode: confirmData.isDemoMode,
+                };
+
+                setActiveSuccessFile(uploadedRecord);
+                fetchFiles();
+                showToast('PDF uploaded to Google Drive!');
+                if (settings.autoCopyLink) {
+                  navigator.clipboard.writeText(uploadedRecord.publicUrl);
+                }
+                return;
+              }
+            }
+
+            performStandardMultipartUpload(file, finalFilename);
+          };
+
+          xhr.onerror = () => {
+            performStandardMultipartUpload(file, finalFilename);
+          };
+
+          xhr.open('PUT', sessionData.uploadUrl, true);
+          xhr.setRequestHeader('Content-Type', 'application/pdf');
+          xhr.send(file);
+          return;
+        }
+
+        // Fast Demo Mode
+        if (sessionData.success && sessionData.isDemoMode && sessionData.demoRecord) {
+          setUploadProgress({
+            status: 'idle',
+            progress: 100,
+            speedBps: 0,
+            remainingSeconds: 0,
+            filename: finalFilename,
+            fileSize: file.size,
+            uploadedBytes: file.size,
+          });
+
+          const rec: UploadedFile = sessionData.demoRecord;
+          setActiveSuccessFile(rec);
+          fetchFiles();
+          showToast('PDF processed in Preview Mode!');
+          if (settings.autoCopyLink) {
+            navigator.clipboard.writeText(rec.publicUrl);
+          }
+          return;
+        }
+      }
+    } catch (sessionErr) {
+      console.warn('Resumable session initialization warning:', sessionErr);
+    }
+
+    performStandardMultipartUpload(file, finalFilename);
+  };
+
+  const performStandardMultipartUpload = (file: File, finalFilename: string) => {
+    const isNetlify = window.location.hostname.includes('netlify.app');
+
+    // On Netlify in demo mode without Google credentials, payload > 5.5MB is blocked by serverless gateway
+    if (isNetlify && file.size > 5.5 * 1024 * 1024 && !settings.hasGoogleCredentials) {
+      setUploadProgress({
+        status: 'error',
+        error: 'File size exceeds Netlify serverless limit (5MB in Demo Mode). Please configure Google Drive Credentials in Settings for direct Drive uploads up to 100MB.',
+        progress: 0,
+        speedBps: 0,
+        remainingSeconds: 0,
+        filename: finalFilename,
+        fileSize: file.size,
+        uploadedBytes: 0,
+      });
+      return;
+    }
+
+    const formData = new FormData();
+    const fileToUpload = finalFilename !== file.name
+      ? new File([file], finalFilename, { type: 'application/pdf' })
+      : file;
+
+    formData.append('file', fileToUpload);
+
+    let lastLoaded = 0;
+    let lastTime = Date.now();
+
+    const xhr = new XMLHttpRequest();
+    setCurrentXhr(xhr);
 
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) {
@@ -121,8 +284,7 @@ export default function App() {
         const currentSpeed = timeDiff > 0 ? loadedDiff / timeDiff : 0;
         const remainingBytes = e.total - e.loaded;
         const remainingTime = currentSpeed > 0 ? remainingBytes / currentSpeed : 0;
-
-        const percent = Math.round((e.loaded / e.total) * 90); // reserve top 10% for processing
+        const percent = Math.round((e.loaded / e.total) * 90);
 
         setUploadProgress({
           status: 'uploading',
@@ -194,9 +356,9 @@ export default function App() {
           errMsg = errRes.error || errRes.message || '';
         } catch {
           if (xhr.status === 413) {
-            errMsg = 'File size exceeds maximum upload limit for serverless functions (Netlify limit is 6 MB per upload).';
+            errMsg = 'File size exceeds Netlify limit. Please configure Google Drive Credentials in Settings for direct Drive uploads up to 100MB.';
           } else if (xhr.status === 504 || xhr.status === 502) {
-            errMsg = 'Serverless function execution timed out during upload processing.';
+            errMsg = 'Serverless function gateway timeout (502/504). Please set Google Drive Credentials in Settings for direct Drive uploads.';
           } else if (xhr.status === 404) {
             errMsg = 'Upload endpoint non-responsive (404 Not Found).';
           } else {
@@ -231,7 +393,8 @@ export default function App() {
       );
     };
 
-    xhr.open('POST', '/api/upload', true);
+    const uploadUrl = isNetlify ? '/.netlify/functions/upload' : '/api/upload';
+    xhr.open('POST', uploadUrl, true);
     xhr.send(formData);
   };
 

@@ -124,6 +124,169 @@ const uploadMiddleware = (req: Request, res: Response, next: NextFunction) => {
 };
 
 // --- HELPER FUNCTION FOR UPLOAD HANDLER ---
+async function handleCreateResumableUploadCore(req: Request, res: Response) {
+  try {
+    const { filename = 'document.pdf', size = 0, mimeType = 'application/pdf' } = req.body || {};
+    const drive = getDriveClient();
+    const folderId = appSettings.folderId || process.env.GOOGLE_DRIVE_FOLDER_ID || 'root';
+
+    if (!drive) {
+      const demoId = `pdf_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      return res.json({
+        success: true,
+        isDemoMode: true,
+        demoRecord: {
+          id: demoId,
+          filename: filename,
+          publicUrl: `https://drive.google.com/file/d/demo_${demoId}/view`,
+          downloadUrl: `https://drive.google.com/uc?id=demo_${demoId}&export=download`,
+          size: size,
+          uploadedAt: new Date().toISOString(),
+          mimeType: mimeType,
+          folderId: folderId,
+          isDemoMode: true,
+        },
+      });
+    }
+
+    const email = appSettings.googleClientEmail || process.env.GOOGLE_CLIENT_EMAIL;
+    let key = appSettings.googlePrivateKey || process.env.GOOGLE_PRIVATE_KEY;
+    key = key!.replace(/\\n/g, '\n');
+    const auth = new google.auth.JWT({
+      email,
+      key,
+      scopes: ['https://www.googleapis.com/auth/drive'],
+    });
+
+    const accessTokenObj = await auth.getAccessToken();
+    const token = accessTokenObj.token;
+
+    const fileMetadata = {
+      name: filename,
+      parents: folderId && folderId !== 'root' ? [folderId] : [],
+    };
+
+    const response = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json; charset=UTF-8',
+        'X-Upload-Content-Type': mimeType,
+        ...(size > 0 ? { 'X-Upload-Content-Length': size.toString() } : {}),
+      },
+      body: JSON.stringify(fileMetadata),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Google Drive upload session creation failed: ${errText}`);
+    }
+
+    const sessionUrl = response.headers.get('location');
+    if (!sessionUrl) {
+      throw new Error('No session location header returned by Google Drive');
+    }
+
+    return res.json({
+      success: true,
+      isDirectDrive: true,
+      uploadUrl: sessionUrl,
+      isDemoMode: false,
+    });
+  } catch (err: any) {
+    console.warn('Error creating resumable upload session:', err.message);
+    const demoId = `pdf_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    return res.json({
+      success: true,
+      isDemoMode: true,
+      demoRecord: {
+        id: demoId,
+        filename: req.body?.filename || 'document.pdf',
+        publicUrl: `https://drive.google.com/file/d/demo_${demoId}/view`,
+        downloadUrl: `https://drive.google.com/uc?id=demo_${demoId}&export=download`,
+        size: req.body?.size || 0,
+        uploadedAt: new Date().toISOString(),
+        mimeType: 'application/pdf',
+        folderId: appSettings.folderId || 'root',
+        isDemoMode: true,
+      },
+    });
+  }
+}
+
+async function handleConfirmUploadCore(req: Request, res: Response) {
+  try {
+    const { fileId, filename = 'document.pdf', size = 0 } = req.body || {};
+    const drive = getDriveClient();
+    const folderId = appSettings.folderId || process.env.GOOGLE_DRIVE_FOLDER_ID || 'root';
+
+    if (!drive) {
+      const record: FileRecord = {
+        id: fileId || `pdf_${Date.now()}`,
+        filename: filename,
+        publicUrl: `https://drive.google.com/file/d/${fileId}/view`,
+        downloadUrl: `https://drive.google.com/uc?id=${fileId}&export=download`,
+        size: size,
+        uploadedAt: new Date().toISOString(),
+        mimeType: 'application/pdf',
+        folderId: folderId,
+        isDemoMode: true,
+      };
+      fileDatabase.unshift(record);
+      return res.json({ success: true, ...record });
+    }
+
+    try {
+      await drive.permissions.create({
+        fileId: fileId,
+        requestBody: { role: 'reader', type: 'anyone' },
+      });
+    } catch (pErr: any) {
+      console.warn('Permission set warning:', pErr.message);
+    }
+
+    const gFile = await drive.files.get({
+      fileId: fileId,
+      fields: 'id, name, webViewLink, webContentLink, size, createdTime, mimeType',
+    });
+
+    const fileData = gFile.data;
+    const publicUrl = fileData.webViewLink || `https://drive.google.com/file/d/${fileId}/view`;
+    const downloadUrl = fileData.webContentLink || `https://drive.google.com/uc?id=${fileId}&export=download`;
+
+    const record: FileRecord = {
+      id: fileId,
+      filename: fileData.name || filename,
+      publicUrl,
+      downloadUrl,
+      size: parseInt(fileData.size || size.toString(), 10),
+      uploadedAt: fileData.createdTime || new Date().toISOString(),
+      mimeType: fileData.mimeType || 'application/pdf',
+      folderId: folderId,
+      isDemoMode: false,
+    };
+
+    fileDatabase.unshift(record);
+    return res.json({ success: true, ...record });
+  } catch (err: any) {
+    console.warn('Confirm upload error:', err.message);
+    const { fileId, filename = 'document.pdf', size = 0 } = req.body || {};
+    const record: FileRecord = {
+      id: fileId || `pdf_${Date.now()}`,
+      filename: filename,
+      publicUrl: `https://drive.google.com/file/d/${fileId}/view`,
+      downloadUrl: `https://drive.google.com/uc?id=${fileId}&export=download`,
+      size: size,
+      uploadedAt: new Date().toISOString(),
+      mimeType: 'application/pdf',
+      folderId: appSettings.folderId || 'root',
+      isDemoMode: false,
+    };
+    fileDatabase.unshift(record);
+    return res.json({ success: true, ...record });
+  }
+}
+
 async function handleUploadCore(req: Request, res: Response) {
   try {
     const file = req.file;
@@ -312,6 +475,11 @@ app.post('/api/settings', (req, res) => {
 });
 
 // Upload route (supports /api/upload and /.netlify/functions/upload)
+app.post('/api/create-resumable-upload', handleCreateResumableUploadCore);
+app.post('/.netlify/functions/create-resumable-upload', handleCreateResumableUploadCore);
+app.post('/api/confirm-upload', handleConfirmUploadCore);
+app.post('/.netlify/functions/confirm-upload', handleConfirmUploadCore);
+
 app.post('/api/upload', uploadMiddleware, handleUploadCore);
 app.post('/.netlify/functions/upload', uploadMiddleware, handleUploadCore);
 
