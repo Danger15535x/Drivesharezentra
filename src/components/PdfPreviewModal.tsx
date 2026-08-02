@@ -10,6 +10,18 @@ interface PdfPreviewModalProps {
 export const PdfPreviewModal: React.FC<PdfPreviewModalProps> = ({ file, onClose }) => {
   if (!file) return null;
 
+  // Compute clean direct preview URL for iframe
+  let iframeSrc = file.publicUrl;
+  if (!file.isDemoMode && file.publicUrl.includes('drive.google.com')) {
+    iframeSrc = file.publicUrl.replace(/\/view(\?.*)?$/, '/preview');
+  } else if (!file.publicUrl.startsWith('http')) {
+    iframeSrc = file.publicUrl;
+  } else {
+    iframeSrc = `/api/files/${file.id}/view`;
+  }
+
+  const directViewUrl = `/api/files/${file.id}/view`;
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-2 sm:p-6 animate-fade-in">
       <div className="bg-white dark:bg-slate-900 rounded-3xl w-full max-w-5xl h-[90vh] flex flex-col shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden">
@@ -23,11 +35,22 @@ export const PdfPreviewModal: React.FC<PdfPreviewModalProps> = ({ file, onClose 
               <h3 className="font-bold text-sm text-slate-900 dark:text-white truncate">
                 {file.filename}
               </h3>
-              <p className="text-[11px] text-slate-500">PDF Document Preview</p>
+              <p className="text-[11px] text-slate-500">PDF Document Direct View</p>
             </div>
           </div>
 
           <div className="flex items-center space-x-2">
+            <a
+              href={directViewUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-3 py-1.5 rounded-xl bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-300 hover:bg-blue-100 text-xs font-semibold flex items-center space-x-1 transition-colors"
+              title="Open Direct Raw PDF"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              <span>Direct PDF</span>
+            </a>
+
             <a
               href={file.downloadUrl}
               download={file.filename}
@@ -35,16 +58,6 @@ export const PdfPreviewModal: React.FC<PdfPreviewModalProps> = ({ file, onClose 
               title="Download PDF"
             >
               <Download className="w-4 h-4" />
-            </a>
-
-            <a
-              href={file.publicUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="p-2 rounded-xl text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-              title="Open in Google Drive / New Tab"
-            >
-              <ExternalLink className="w-4 h-4" />
             </a>
 
             <button
@@ -60,7 +73,7 @@ export const PdfPreviewModal: React.FC<PdfPreviewModalProps> = ({ file, onClose 
         {/* Modal Body / iFrame viewer */}
         <div className="flex-1 bg-slate-100 dark:bg-slate-950 relative overflow-hidden">
           <iframe
-            src={file.publicUrl}
+            src={iframeSrc}
             title={file.filename}
             className="w-full h-full border-none"
           />

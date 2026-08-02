@@ -1,6 +1,7 @@
-import express, { Request, Response } from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import path from 'path';
 import fs from 'fs';
+import { Readable } from 'stream';
 import multer from 'multer';
 import { google } from 'googleapis';
 import { createServer as createViteServer } from 'vite';
@@ -80,7 +81,13 @@ function getDriveClient() {
   const email = appSettings.googleClientEmail || process.env.GOOGLE_CLIENT_EMAIL;
   let key = appSettings.googlePrivateKey || process.env.GOOGLE_PRIVATE_KEY;
 
-  if (!email || !key) {
+  if (
+    !email ||
+    !key ||
+    email.includes('your-service-account') ||
+    key.includes('YOUR_PRIVATE_KEY') ||
+    key.length < 30
+  ) {
     return null;
   }
 
@@ -99,6 +106,23 @@ function getDriveClient() {
   }
 }
 
+// Multer upload middleware with JSON error handling
+const uploadMiddleware = (req: Request, res: Response, next: NextFunction) => {
+  upload.single('file')(req, res, (err: any) => {
+    if (err instanceof multer.MulterError) {
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(400).json({
+          error: `File size exceeds the configured maximum upload limit of ${appSettings.maxUploadSizeMb} MB.`
+        });
+      }
+      return res.status(400).json({ error: `Upload error: ${err.message}` });
+    } else if (err) {
+      return res.status(400).json({ error: err.message || 'File upload error' });
+    }
+    next();
+  });
+};
+
 // --- HELPER FUNCTION FOR UPLOAD HANDLER ---
 async function handleUploadCore(req: Request, res: Response) {
   try {
@@ -107,8 +131,13 @@ async function handleUploadCore(req: Request, res: Response) {
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
-    if (file.mimetype !== 'application/pdf') {
-      return res.status(400).json({ error: 'Invalid file type. Only PDF files are allowed.' });
+    const isPdf =
+      file.mimetype.toLowerCase().includes('pdf') ||
+      file.originalname.toLowerCase().endsWith('.pdf') ||
+      file.mimetype === 'application/octet-stream';
+
+    if (!isPdf) {
+      return res.status(400).json({ error: 'Invalid file type. Only PDF files are supported.' });
     }
 
     const maxBytes = appSettings.maxUploadSizeMb * 1024 * 1024;
@@ -122,6 +151,16 @@ async function handleUploadCore(req: Request, res: Response) {
     const drive = getDriveClient();
     const folderId = appSettings.folderId || process.env.GOOGLE_DRIVE_FOLDER_ID || 'root';
 
+    // Always create a local disk file backup for actual storage & direct inline viewing
+    const localFileId = `pdf_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const savedFilename = `${localFileId}_${safeFilename}`;
+    const localFilePath = path.join(UPLOADS_DIR, savedFilename);
+    fs.writeFileSync(localFilePath, file.buffer);
+
+    const host = req.get('host') || `localhost:${PORT}`;
+    const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'http';
+    const baseUrl = `${protocol}://${host}`;
+
     if (drive) {
       try {
         const fileMetadata = {
@@ -131,7 +170,7 @@ async function handleUploadCore(req: Request, res: Response) {
 
         const media = {
           mimeType: 'application/pdf',
-          body: require('stream').Readable.from(file.buffer),
+          body: Readable.from(file.buffer),
         };
 
         const gFile = await drive.files.create({
@@ -169,6 +208,7 @@ async function handleUploadCore(req: Request, res: Response) {
           mimeType: 'application/pdf',
           folderId: folderId,
           isDemoMode: false,
+          localPath: savedFilename,
         };
 
         fileDatabase.unshift(record);
@@ -179,24 +219,16 @@ async function handleUploadCore(req: Request, res: Response) {
           ...record,
         });
       } catch (driveErr: any) {
-        console.error('Google Drive API upload error:', driveErr?.message || driveErr);
-        // Fall back to local storage if API fails so the user request succeeds smoothly
+        console.warn('Google Drive API upload failed, falling back to local storage:', driveErr?.message || driveErr);
       }
     }
 
-    // Local / Demo Mode Storage
-    const fileId = `pdf_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const savedFilename = `${fileId}_${safeFilename}`;
-    const localFilePath = path.join(UPLOADS_DIR, savedFilename);
-
-    fs.writeFileSync(localFilePath, file.buffer);
-
-    const baseUrl = process.env.APP_URL || `http://localhost:${PORT}`;
-    const publicUrl = `${baseUrl}/api/files/${fileId}/view`;
-    const downloadUrl = `${baseUrl}/api/files/${fileId}/download`;
+    // Local / Serverless Storage Mode
+    const publicUrl = `${baseUrl}/api/files/${localFileId}/view`;
+    const downloadUrl = `${baseUrl}/api/files/${localFileId}/download`;
 
     const record: FileRecord = {
-      id: fileId,
+      id: localFileId,
       filename: safeFilename,
       publicUrl,
       downloadUrl,
@@ -280,14 +312,30 @@ app.post('/api/settings', (req, res) => {
 });
 
 // Upload route (supports /api/upload and /.netlify/functions/upload)
-app.post('/api/upload', upload.single('file'), handleUploadCore);
-app.post('/.netlify/functions/upload', upload.single('file'), handleUploadCore);
+app.post('/api/upload', uploadMiddleware, handleUploadCore);
+app.post('/.netlify/functions/upload', uploadMiddleware, handleUploadCore);
 
 // List route (supports /api/list and /.netlify/functions/list)
+// List route (supports /api/list and /.netlify/functions/list)
 const handleListCore = (req: Request, res: Response) => {
+  const host = req.get('host') || `localhost:${PORT}`;
+  const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'http';
+  const baseUrl = `${protocol}://${host}`;
+
+  const filesWithDynamicUrls = fileDatabase.map((file) => {
+    if (file.isDemoMode || (file.localPath && file.publicUrl.includes('localhost'))) {
+      return {
+        ...file,
+        publicUrl: `${baseUrl}/api/files/${file.id}/view`,
+        downloadUrl: `${baseUrl}/api/files/${file.id}/download`,
+      };
+    }
+    return file;
+  });
+
   res.json({
     success: true,
-    files: fileDatabase,
+    files: filesWithDynamicUrls,
   });
 };
 
@@ -367,33 +415,43 @@ app.delete('/api/delete', handleDeleteCore);
 app.post('/api/delete', handleDeleteCore);
 app.post('/.netlify/functions/delete', handleDeleteCore);
 
-// Direct file viewer / downloader for local demo mode
+// Direct file viewer / downloader endpoints
 app.get('/api/files/:id/view', (req, res) => {
   const fileRecord = fileDatabase.find((f) => f.id === req.params.id);
-  if (!fileRecord || !fileRecord.localPath) {
+  if (!fileRecord) {
     return res.status(404).send('File not found');
   }
-  const filePath = path.join(UPLOADS_DIR, fileRecord.localPath);
-  if (!fs.existsSync(filePath)) {
-    return res.status(404).send('File binary missing');
+  if (fileRecord.localPath) {
+    const filePath = path.join(UPLOADS_DIR, fileRecord.localPath);
+    if (fs.existsSync(filePath)) {
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(fileRecord.filename)}"`);
+      return fs.createReadStream(filePath).pipe(res);
+    }
   }
-  res.setHeader('Content-Type', 'application/pdf');
-  res.setHeader('Content-Disposition', `inline; filename="${fileRecord.filename}"`);
-  fs.createReadStream(filePath).pipe(res);
+  if (fileRecord.publicUrl) {
+    return res.redirect(fileRecord.publicUrl);
+  }
+  return res.status(404).send('File binary missing');
 });
 
 app.get('/api/files/:id/download', (req, res) => {
   const fileRecord = fileDatabase.find((f) => f.id === req.params.id);
-  if (!fileRecord || !fileRecord.localPath) {
+  if (!fileRecord) {
     return res.status(404).send('File not found');
   }
-  const filePath = path.join(UPLOADS_DIR, fileRecord.localPath);
-  if (!fs.existsSync(filePath)) {
-    return res.status(404).send('File binary missing');
+  if (fileRecord.localPath) {
+    const filePath = path.join(UPLOADS_DIR, fileRecord.localPath);
+    if (fs.existsSync(filePath)) {
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fileRecord.filename)}"`);
+      return fs.createReadStream(filePath).pipe(res);
+    }
   }
-  res.setHeader('Content-Type', 'application/pdf');
-  res.setHeader('Content-Disposition', `attachment; filename="${fileRecord.filename}"`);
-  fs.createReadStream(filePath).pipe(res);
+  if (fileRecord.downloadUrl) {
+    return res.redirect(fileRecord.downloadUrl);
+  }
+  return res.status(404).send('File binary missing');
 });
 
 // START SERVER / VITE SETUP
